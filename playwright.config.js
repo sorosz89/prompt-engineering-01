@@ -2,9 +2,10 @@
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
-  testDir: '.',
+  testDir: './data/results/tests',
   testMatch: /\.(spec|test)\.(js|ts|mjs)$/,
   use: {
-    baseURL: 'https://demo.playwright.dev/',
+    baseURL: 'http://127.0.0.1:7001',
+    // https://demo.playwright.dev/todomvc
   },
 });
