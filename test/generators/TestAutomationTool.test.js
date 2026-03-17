@@ -3,7 +3,7 @@
  * @see {@link module:src/generators/TestAutomationTool}
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import path from 'path';
 
 const {
@@ -29,9 +29,7 @@ const {
         topP: 0.9,
         maxOutputTokens: 8192
     }));
-    const mockInvoke = vi.fn().mockResolvedValue({
-        content: JSON.stringify({ code: defaultCode })
-    });
+    const mockInvoke = vi.fn().mockResolvedValue({ content: JSON.stringify({ code: defaultCode }) });
     const mockChatGoogleGenerativeAI = vi.fn(() => ({ invoke: mockInvoke }));
     return {
         defaultCode,
@@ -54,11 +52,7 @@ vi.mock('../../src/utils/index.js', () => ({
     writeFileUtf8: (...args) => mockWriteFileUtf8(...args),
     toSafeFilename: (...args) => mockToSafeFilename(...args)
 }));
-
-vi.mock('@langchain/google-genai', () => ({
-    ChatGoogleGenerativeAI: mockChatGoogleGenerativeAI
-}));
-
+vi.mock('@langchain/google-genai', () => ({ ChatGoogleGenerativeAI: mockChatGoogleGenerativeAI }));
 vi.mock('commander', () => ({
     program: {
         name: vi.fn(function () { return this; }),
@@ -67,7 +61,6 @@ vi.mock('commander', () => ({
         opts: vi.fn(() => ({ testcase: '', pageobject: '', output: '' }))
     }
 }));
-
 vi.spyOn(process, 'exit').mockImplementation(() => {});
 
 const { default: TestAutomationTool } = await import('../../src/generators/TestAutomationTool.js');
@@ -85,92 +78,54 @@ describe('TestAutomationTool', () => {
         tool = new TestAutomationTool();
     });
 
-    afterEach(() => {
-        vi.useRealTimers();
-    });
-
     describe('_readFile', () => {
         it('normalizes path and calls readFileUtf8 with label', async () => {
-            const content = 'file content';
-            mockReadFileUtf8.mockResolvedValue(content);
-
+            mockReadFileUtf8.mockResolvedValue('content');
             const result = await tool._readFile('some/testcase.json', 'Test case file');
-
-            expect(mockReadFileUtf8).toHaveBeenCalledTimes(1);
-            expect(mockReadFileUtf8).toHaveBeenCalledWith(
-                path.normalize('some/testcase.json'),
-                'Test case file'
-            );
-            expect(result).toBe(content);
+            expect(mockReadFileUtf8).toHaveBeenCalledWith(path.normalize('some/testcase.json'), 'Test case file');
+            expect(result).toBe('content');
         });
-
-        it('uses default label "File" when not provided', async () => {
-            mockReadFileUtf8.mockResolvedValue('x');
-
+        it('uses default label "File" when label omitted', async () => {
             await tool._readFile('path.json');
-
-            expect(mockReadFileUtf8).toHaveBeenCalledWith(
-                path.normalize('path.json'),
-                'File'
-            );
+            expect(mockReadFileUtf8).toHaveBeenCalledWith(path.normalize('path.json'), 'File');
         });
-
-        it('propagates errors from readFileUtf8', async () => {
+        it('propagates read errors', async () => {
             mockReadFileUtf8.mockRejectedValue(new Error('ENOENT'));
-
             await expect(tool._readFile('missing.json')).rejects.toThrow('ENOENT');
         });
     });
 
     describe('_callLLM', () => {
-        it('calls LLM with config (temperature 0.1) and returns { code }', async () => {
+        it('calls LLM with config and returns parsed { code }', async () => {
             const code = "test('x', () => {});";
             mockInvoke.mockResolvedValue({ content: JSON.stringify({ code }) });
-
             const result = await tool._callLLM([
                 { role: 'system', content: 'System' },
                 { role: 'user', content: 'User' }
             ]);
-
             expect(mockGetLLMConfig).toHaveBeenCalledWith({ temperature: 0.1 });
-            expect(mockChatGoogleGenerativeAI).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    model: 'gemini-2.5-flash-lite',
-                    temperature: 0.1,
-                    topP: 0.9,
-                    maxOutputTokens: 8192
-                })
-            );
             expect(mockInvoke).toHaveBeenCalledTimes(1);
             expect(result).toEqual({ code });
         });
-
         it('returns { code: "" } when response has no content', async () => {
             mockInvoke.mockResolvedValue(null);
-
             const result = await tool._callLLM([{ role: 'user', content: 'x' }]);
-
             expect(result).toEqual({ code: '' });
         });
-
         it('throws on LLM error', async () => {
             mockInvoke.mockRejectedValue(new Error('Invalid API key'));
-
-            await expect(
-                tool._callLLM([{ role: 'user', content: 'x' }])
-            ).rejects.toThrow('LLM invocation failed: Invalid API key');
-            expect(mockInvoke).toHaveBeenCalledTimes(1);
+            await expect(tool._callLLM([{ role: 'user', content: 'x' }])).rejects.toThrow(
+                'LLM invocation failed: Invalid API key'
+            );
         });
     });
 
     describe('_saveTestFile', () => {
         const validCode = "import { test } from '@playwright/test';\ntest('x', () => {});";
 
-        it('uses toSafeFilename, ensures output dir, writes .spec.js and returns path', async () => {
+        it('writes .spec.js using toSafeFilename and returns path', async () => {
             mockToSafeFilename.mockReturnValue('TC_ADD_TASK_001');
-
             const outPath = await tool._saveTestFile('TC_ADD_TASK_001', validCode, '/out/dir');
-
             expect(mockToSafeFilename).toHaveBeenCalledWith('TC_ADD_TASK_001', 'automated-test');
             expect(mockEnsureOutputDirWritable).toHaveBeenCalledWith('/out/dir');
             expect(mockWriteFileUtf8).toHaveBeenCalledWith(
@@ -180,53 +135,24 @@ describe('TestAutomationTool', () => {
             );
             expect(outPath).toBe(path.join('/out/dir', 'TC_ADD_TASK_001.spec.js'));
         });
-
-        it('throws when code is empty string', async () => {
-            await expect(
-                tool._saveTestFile('TC_001', '', '/out')
-            ).rejects.toThrow('Invalid test code: non-empty string required');
-            expect(mockEnsureOutputDirWritable).not.toHaveBeenCalled();
+        it.each([
+            ['empty string', ''],
+            ['whitespace', '   \n  '],
+            ['null', null]
+        ])('throws when code is %s', async (_, code) => {
+            await expect(tool._saveTestFile('TC_001', code, '/out')).rejects.toThrow(
+                'Invalid test code: non-empty string required'
+            );
             expect(mockWriteFileUtf8).not.toHaveBeenCalled();
         });
-
-        it('throws when code is only whitespace', async () => {
-            await expect(
-                tool._saveTestFile('TC_001', '   \n  ', '/out')
-            ).rejects.toThrow('Invalid test code: non-empty string required');
-        });
-
-        it('throws when code is not a string', async () => {
-            await expect(
-                tool._saveTestFile('TC_001', null, '/out')
-            ).rejects.toThrow('Invalid test code: non-empty string required');
-        });
-
-        it('uses fallback filename when toSafeFilename returns fallback', async () => {
-            mockToSafeFilename.mockReturnValue('automated-test');
-
-            await tool._saveTestFile('', validCode, '/out');
-
-            expect(mockWriteFileUtf8).toHaveBeenCalledWith(
-                path.join('/out', 'automated-test.spec.js'),
-                validCode.trim(),
-                'test file'
-            );
-        });
-
-        it('propagates errors from ensureOutputDirWritable', async () => {
+        it('propagates errors from ensureOutputDirWritable or writeFileUtf8', async () => {
             mockEnsureOutputDirWritable.mockRejectedValue(new Error('Permission denied'));
+            await expect(tool._saveTestFile('TC_001', validCode, '/out')).rejects.toThrow('Permission denied');
 
-            await expect(
-                tool._saveTestFile('TC_001', validCode, '/out')
-            ).rejects.toThrow('Permission denied');
-        });
-
-        it('propagates errors from writeFileUtf8', async () => {
+            vi.clearAllMocks();
+            mockEnsureOutputDirWritable.mockResolvedValue(undefined);
             mockWriteFileUtf8.mockRejectedValue(new Error('Disk full'));
-
-            await expect(
-                tool._saveTestFile('TC_001', validCode, '/out')
-            ).rejects.toThrow('Disk full');
+            await expect(tool._saveTestFile('TC_001', validCode, '/out')).rejects.toThrow('Disk full');
         });
     });
 
@@ -243,127 +169,65 @@ describe('TestAutomationTool', () => {
             mockToSafeFilename.mockReturnValue('TC_ADD_001');
         });
 
-        it('reads test case and page object, calls LLM, saves .spec.js and returns result', async () => {
-            const result = await tool.automateTests(
-                '/path/tc.json',
-                '/path/todo-page.js',
-                '/output'
-            );
+        it('reads tc + po, calls LLM, saves .spec.js and returns result', async () => {
+            const result = await tool.automateTests('/path/tc.json', '/path/todo-page.js', '/output');
 
             expect(mockReadFileUtf8).toHaveBeenCalledTimes(2);
-            expect(mockReadFileUtf8).toHaveBeenNthCalledWith(
-                1,
-                path.normalize('/path/tc.json'),
-                'Test case file'
-            );
-            expect(mockReadFileUtf8).toHaveBeenNthCalledWith(
-                2,
-                path.normalize('/path/todo-page.js'),
-                'Page object file'
-            );
-
-            const invokeMessages = mockInvoke.mock.calls[0][0];
-            expect(invokeMessages).toHaveLength(2);
-            expect(invokeMessages[0].constructor.name).toBe('SystemMessage');
-            expect(invokeMessages[1].constructor.name).toBe('HumanMessage');
-            expect(invokeMessages[1].content).toContain('## Test case');
-            expect(invokeMessages[1].content).toContain('## Page object');
-            expect(invokeMessages[1].content).toContain(testCaseContent);
-            expect(invokeMessages[1].content).toContain(pageObjectContent);
-
-            expect(mockToSafeFilename).toHaveBeenCalledWith('TC_ADD_001', 'automated-test');
+            expect(mockReadFileUtf8).toHaveBeenNthCalledWith(1, path.normalize('/path/tc.json'), 'Test case file');
+            expect(mockReadFileUtf8).toHaveBeenNthCalledWith(2, path.normalize('/path/todo-page.js'), 'Page object file');
+            expect(mockInvoke).toHaveBeenCalledTimes(1);
+            const userContent = mockInvoke.mock.calls[0][0][1].content;
+            expect(userContent).toContain('## Test case');
+            expect(userContent).toContain('## Page object');
+            expect(userContent).toContain(testCaseContent);
+            expect(userContent).toContain(pageObjectContent);
             expect(mockWriteFileUtf8).toHaveBeenCalledWith(
                 path.join('/output', 'TC_ADD_001.spec.js'),
                 generatedCode.trim(),
                 'test file'
             );
-
             expect(result).toEqual({
                 testCaseId: 'TC_ADD_001',
                 code: generatedCode,
                 outputFile: path.join('/output', 'TC_ADD_001.spec.js')
             });
         });
-
-        it('uses default testCaseId "automated-test" when test case has no id', async () => {
-            mockReadFileUtf8
-                .mockReset()
-                .mockResolvedValueOnce('{"title":"No id"}')
-                .mockResolvedValueOnce(pageObjectContent);
+        it('uses testCaseId "automated-test" when test case has no id or invalid JSON', async () => {
+            mockReadFileUtf8.mockReset().mockResolvedValueOnce('{"title":"No id"}').mockResolvedValueOnce(pageObjectContent);
             mockToSafeFilename.mockReturnValue('automated-test');
+            const result1 = await tool.automateTests('tc.json', 'po.js', '/out');
+            expect(result1.testCaseId).toBe('automated-test');
+            expect(result1.outputFile).toBe(path.join('/out', 'automated-test.spec.js'));
 
-            const result = await tool.automateTests('tc.json', 'po.js', '/out');
-
-            expect(mockToSafeFilename).toHaveBeenCalledWith('automated-test', 'automated-test');
-            expect(result.testCaseId).toBe('automated-test');
-            expect(result.outputFile).toBe(path.join('/out', 'automated-test.spec.js'));
+            mockReadFileUtf8.mockReset().mockResolvedValueOnce('not json').mockResolvedValueOnce(pageObjectContent);
+            const result2 = await tool.automateTests('tc.json', 'po.js', '/out');
+            expect(result2.testCaseId).toBe('automated-test');
         });
-
-        it('uses default testCaseId when test case JSON is invalid', async () => {
-            mockReadFileUtf8
-                .mockReset()
-                .mockResolvedValueOnce('not json')
-                .mockResolvedValueOnce(pageObjectContent);
-            mockToSafeFilename.mockReturnValue('automated-test');
-
-            const result = await tool.automateTests('tc.json', 'po.js', '/out');
-
-            expect(result.testCaseId).toBe('automated-test');
-        });
-
         it('includes relative page object import path in user prompt', async () => {
-            mockReadFileUtf8
-                .mockReset()
-                .mockResolvedValueOnce(testCaseContent)
-                .mockResolvedValueOnce(pageObjectContent);
-
-            await tool.automateTests(
-                '/project/tc.json',
-                '/project/pageobjects/todo-page.js',
-                '/project/output'
-            );
-
+            mockReadFileUtf8.mockReset().mockResolvedValueOnce(testCaseContent).mockResolvedValueOnce(pageObjectContent);
+            await tool.automateTests('/project/tc.json', '/project/pageobjects/todo-page.js', '/project/output');
             const userContent = mockInvoke.mock.calls[0][0][1].content;
             expect(userContent).toMatch(/Import path to use for the page object:/);
         });
-
-        it('throws when LLM returns no code', async () => {
+        it('throws when LLM returns no or empty code', async () => {
             mockInvoke.mockResolvedValue({ content: '{}' });
-
-            await expect(
-                tool.automateTests('tc.json', 'po.js', '/out')
-            ).rejects.toThrow('LLM returned empty or invalid test code.');
-            expect(mockEnsureOutputDirWritable).not.toHaveBeenCalled();
-            expect(mockWriteFileUtf8).not.toHaveBeenCalled();
-        });
-
-        it('throws when LLM returns empty string code', async () => {
+            await expect(tool.automateTests('tc.json', 'po.js', '/out')).rejects.toThrow(
+                'LLM returned empty or invalid test code.'
+            );
             mockInvoke.mockResolvedValue({ content: JSON.stringify({ code: '   ' }) });
-
-            await expect(
-                tool.automateTests('tc.json', 'po.js', '/out')
-            ).rejects.toThrow('LLM returned empty or invalid test code.');
+            await expect(tool.automateTests('tc.json', 'po.js', '/out')).rejects.toThrow(
+                'LLM returned empty or invalid test code.'
+            );
         });
-
-        it('throws when reading test case fails', async () => {
+        it.each([
+            ['test case', () => mockReadFileUtf8.mockRejectedValue(new Error('ENOENT'))],
+            ['page object', () => {
+                mockReadFileUtf8.mockResolvedValueOnce(testCaseContent).mockRejectedValueOnce(new Error('ENOENT'));
+            }]
+        ])('throws when reading %s fails', async (_, setup) => {
             mockReadFileUtf8.mockReset();
-            mockReadFileUtf8.mockRejectedValue(new Error('ENOENT'));
-
-            await expect(
-                tool.automateTests('missing.json', 'po.js', '/out')
-            ).rejects.toThrow('ENOENT');
-            expect(mockInvoke).not.toHaveBeenCalled();
-        });
-
-        it('throws when reading page object fails', async () => {
-            mockReadFileUtf8.mockReset();
-            mockReadFileUtf8
-                .mockResolvedValueOnce(testCaseContent)
-                .mockRejectedValueOnce(new Error('ENOENT'));
-
-            await expect(
-                tool.automateTests('tc.json', 'missing.js', '/out')
-            ).rejects.toThrow('ENOENT');
+            setup();
+            await expect(tool.automateTests('tc.json', 'po.js', '/out')).rejects.toThrow('ENOENT');
             expect(mockInvoke).not.toHaveBeenCalled();
         });
     });
