@@ -15,14 +15,22 @@ dotenv.config();
 
 const log = createLogger('[PageObjectGenerator]');
 
+/** System prompt: instructs the LLM to output a Playwright page object as a single ES module. */
 const SYSTEM_PROMPT = `You generate a Playwright page object as one JavaScript ES module (plain JS, no TypeScript).
 - One class: constructor(page), getters for locators (getByRole, getByPlaceholder, getByLabel, getByTestId), async methods for actions.
 - camelCase names. Export default the class. Output raw JS only, no markdown fences.`;
 
 /**
- * Generates a Playwright page object from user interaction traces using an LLM.
+ * Generates a Playwright page object (ES module) from user interaction traces using an LLM.
  */
 export default class PageObjectGenerator {
+    /**
+     * Reads the traces file. Appends `.traces` if the path does not already end with it.
+     * @param {string} filePath - Path to the traces file (with or without .traces)
+     * @param {string} [label='Traces file'] - Label for errors and debug logs
+     * @returns {Promise<string>} File contents as UTF-8
+     * @throws {Error} If the file does not exist or cannot be read
+     */
     async _readFile(filePath, label = 'Traces file') {
         const pathWithExtension = path.normalize(filePath.endsWith('.traces') ? filePath : `${filePath}.traces`);
         const content = await readFileUtf8(pathWithExtension, label);
@@ -30,12 +38,23 @@ export default class PageObjectGenerator {
         return content;
     }
 
+    /**
+     * Removes markdown code fence (e.g. ```js ... ```) from LLM response content.
+     * @param {string} code - Raw response content, possibly wrapped in fences
+     * @returns {string} Code without leading/trailing fence
+     */
     _stripCodeFence(code) {
         const trimmed = code.trim();
         const m = trimmed.match(/^```(?:js|javascript)?\s*([\s\S]*?)```\s*$/);
         return m ? m[1].trim() : trimmed;
     }
 
+    /**
+     * Invokes the LLM with the system prompt and traces content; returns generated JS source (fence stripped).
+     * @param {string} tracesContent - Raw traces file content
+     * @returns {Promise<string>} Generated page object JavaScript source
+     * @throws {Error} If the LLM request fails
+     */
     async _callLLM(tracesContent) {
         const config = getLLMConfig({ temperature: 0 });
         log.info('Calling LLM...', { model: config.model });
@@ -56,6 +75,13 @@ export default class PageObjectGenerator {
         }
     }
 
+    /**
+     * Writes the page object JavaScript source to `po.js` in the given output directory.
+     * @param {string} source - Page object JavaScript source (non-empty)
+     * @param {string} outputPath - Output directory path
+     * @returns {Promise<string>} Absolute path of the written file (po.js)
+     * @throws {Error} If source is invalid or write fails
+     */
     async savePageObject(source, outputPath) {
         if (typeof source !== 'string' || !source.trim()) {
             throw new Error('Invalid page object result: expected non-empty JavaScript source string');
@@ -67,6 +93,13 @@ export default class PageObjectGenerator {
         return outFile;
     }
 
+    /**
+     * Runs the full pipeline: read traces, call LLM, save page object to po.js.
+     * @param {string} tracesPath - Path to the traces file (with or without .traces)
+     * @param {string} outputPath - Output directory for po.js
+     * @returns {Promise<{ path: string, source: string }>} Path to the written file and its source
+     * @throws {Error} If any step fails or the LLM returns empty/invalid content
+     */
     async generatePageObject(tracesPath, outputPath) {
         log.info('Starting page object generation:', { tracesPath, outputPath });
 

@@ -47,6 +47,13 @@ Tone/Format
 End
 Ensure the code is valid JavaScript and uses only the provided page object API.`;
 
+/**
+ * Builds the user prompt containing test case JSON, page object source, and optional import path.
+ * @param {string} testCaseContent - Raw test case JSON content
+ * @param {string} pageObjectContent - Page object JavaScript source
+ * @param {string} [pageObjectPath=''] - Relative import path for the page object (e.g. for the generated test file)
+ * @returns {string} Combined user message content
+ */
 function buildUserPrompt(testCaseContent, pageObjectContent, pageObjectPath = '') {
     const parts = [
         'Generate a Playwright test file (plain ECMAScript) from the test case and page object below.',
@@ -74,13 +81,29 @@ const testcasePath = opts.testcase ?? opts.tc;
 const pageobjectPath = opts.pageobject ?? opts.po;
 const outputPath = opts.output ?? opts.o;
 
+/**
+ * Generates Playwright automated test JavaScript from a test case (JSON) and page object (JS) using an LLM.
+ */
 export default class TestAutomationTool {
+    /**
+     * Reads a file as UTF-8. Normalizes the path before reading.
+     * @param {string} filePath - Path to the file
+     * @param {string} [label='File'] - Label for errors and debug logs
+     * @returns {Promise<string>} File contents
+     * @throws {Error} If the file does not exist or cannot be read
+     */
     async _readFile(filePath, label = 'File') {
         const content = await readFileUtf8(path.normalize(filePath), label);
         log.debug(`Read ${label}: ${filePath} (${content.length} chars)`);
         return content;
     }
 
+    /**
+     * Invokes the LLM with the given messages and returns parsed { code } from the response.
+     * @param {Array<{ role: 'system'|'user', content: string }>} messages - System and user messages
+     * @returns {Promise<{ code: string }>} Object with a single `code` property (test file content)
+     * @throws {Error} If the LLM request fails
+     */
     async _callLLM(messages) {
         const config = getLLMConfig({ temperature: 0.1 });
         log.info('Calling LLM for automated test generation...', { model: config.model });
@@ -106,6 +129,11 @@ export default class TestAutomationTool {
         }
     }
 
+    /**
+     * Extracts test code from LLM response: parses JSON with a "code" key, or falls back to raw content.
+     * @param {string} content - Raw LLM response content (e.g. JSON string or plain text)
+     * @returns {{ code: string }} Object with `code` property; may be empty string if parsing fails
+     */
     _parseCodeFromResponse(content) {
         const trimmed = content.trim();
         try {
@@ -127,6 +155,14 @@ export default class TestAutomationTool {
         return { code: trimmed };
     }
 
+    /**
+     * Validates test code, ensures output directory is writable, and writes a .spec.js file.
+     * @param {string} testCaseId - Used for filename (sanitized via toSafeFilename); fallback "automated-test"
+     * @param {string} code - Generated test file content (non-empty)
+     * @param {string} outputDir - Output directory path
+     * @returns {Promise<string>} Absolute path of the written .spec.js file
+     * @throws {Error} If code is invalid or write fails
+     */
     async _saveTestFile(testCaseId, code, outputDir) {
         if (!code || typeof code !== 'string' || !code.trim()) {
             throw new Error('Invalid test code: non-empty string required');
@@ -139,6 +175,16 @@ export default class TestAutomationTool {
         return outFile;
     }
 
+    /**
+     * Runs the full pipeline: read test case and page object, call LLM, save generated test to .spec.js.
+     * Derives testCaseId from test case JSON (id field) or uses "automated-test". Computes relative
+     * page object import path for the generated test file.
+     * @param {string} testCasePath - Path to the test case JSON file
+     * @param {string} pageObjectPath - Path to the page object JavaScript file
+     * @param {string} outputDir - Output directory for the generated .spec.js file
+     * @returns {Promise<{ testCaseId: string, code: string, outputFile: string }>} Id, generated code, and output path
+     * @throws {Error} If any step fails or the LLM returns empty/invalid code
+     */
     async automateTests(testCasePath, pageObjectPath, outputDir) {
         log.info('Starting automation:', { testCasePath, pageObjectPath, outputDir });
 
@@ -175,6 +221,9 @@ export default class TestAutomationTool {
     }
 }
 
+/**
+ * CLI entry point: runs the tool with commander options and exits with code 1 on error.
+ */
 async function run() {
     try {
         const tool = new TestAutomationTool();
